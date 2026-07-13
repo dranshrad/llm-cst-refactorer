@@ -22,9 +22,10 @@ class Engine(str, Enum):
     COMPATIBLE = "compatible"
 
 
+# Reviewed periodically; override with --model / LLM_CST_MODEL.
 DEFAULT_MODELS: dict[Engine, str] = {
-    Engine.ANTHROPIC: "claude-sonnet-4-20250514",
-    Engine.OPENAI: "gpt-4.1-mini",
+    Engine.ANTHROPIC: "claude-sonnet-5",
+    Engine.OPENAI: "gpt-5-mini",
     Engine.COMPATIBLE: "llama3.2",
 }
 
@@ -72,7 +73,7 @@ def load_settings(
     force: bool = False,
     verbose: bool = False,
     min_confidence: float = 0.5,
-    plugin: str = "typing-docstring",
+    plugin: str = "init-return-none,typing-docstring",
     use_cache: bool = True,
     refresh_cache: bool = False,
     cache_dir: Path | None = None,

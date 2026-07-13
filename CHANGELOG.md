@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.1] — 2026-07-14
+
+### Fixed
+
+- Default model IDs updated to current generations: `claude-sonnet-5`, `gpt-5-mini`
+- README before/after replaced with a pipeline-captured golden unified diff
+- Incremental mypy verification no longer fails on sibling untyped defs mid-refactor
+
+### Added
+
+- `init-return-none` deterministic plugin (`-> None` on `__init__`)
+- Comma-separated `--plugin` lists (default: `init-return-none,typing-docstring`)
+- `examples/generate_captured_diff.py` + `examples/captured/sample_legacy.unified.diff`
+- Golden test for the captured README example
+
 ## [0.2.0] — 2026-07-14
 
 ### Added

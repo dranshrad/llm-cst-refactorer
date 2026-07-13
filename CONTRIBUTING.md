@@ -31,6 +31,7 @@ poetry run pytest
 - Add SPDX headers: `# SPDX-License-Identifier: AGPL-3.0-or-later`
 - Keep public APIs fully typed.
 - Plugin API version is `"1"` — bump deliberately and document breaking changes.
+- Default plugins: `init-return-none` (deterministic) + `typing-docstring` (LLM). Refresh the README capture with `poetry run python examples/generate_captured_diff.py` when the apply path changes.
 
 ## License
 

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Async coordinator: index → collect → plugin/LLM → verify → apply."""
+"""Async coordinator: index → collect → plugins/LLM → verify → apply."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from llm_cst_refactorer.diff_util import format_file_diff
 from llm_cst_refactorer.metrics import RunMetrics
 from llm_cst_refactorer.models import Suggestion
 from llm_cst_refactorer.plugins.base import RefactorPlugin
-from llm_cst_refactorer.plugins.factory import create_plugin
+from llm_cst_refactorer.plugins.factory import create_plugins
 from llm_cst_refactorer.prompts import build_user_prompt, parse_suggestion_json
 from llm_cst_refactorer.providers.base import LLMProvider
 from llm_cst_refactorer.repo_index import RepoIndex
@@ -62,6 +62,15 @@ class RefactorReport:
         return sum(len(r.functions_updated) for r in self.results)
 
 
+def merge_suggestions(base: Suggestion, extra: Suggestion) -> Suggestion:
+    """Merge two suggestions; earlier non-None return/docstring wins."""
+    return Suggestion(
+        param_types={**base.param_types, **extra.param_types},
+        return_type=base.return_type if base.return_type is not None else extra.return_type,
+        docstring=base.docstring if base.docstring is not None else extra.docstring,
+    )
+
+
 def _filter_suggestion(fn: SemanticFunction, suggestion: Suggestion) -> Suggestion:
     """Keep only fields that were requested and relevant."""
     param_types = {
@@ -104,7 +113,6 @@ async def _suggest_with_retries(
                 metrics.verify_pass += 1
                 return filtered
             metrics.verify_fail += 1
-            # fall through to regenerate
         else:
             metrics.cache_misses += 1
     elif cache is not None:
@@ -177,13 +185,15 @@ async def process_file(
     settings: Settings,
     *,
     repo_index: RepoIndex | None = None,
+    plugins: list[RefactorPlugin] | None = None,
     plugin: RefactorPlugin | None = None,
     cache: SuggestionCache | None = None,
     metrics: RunMetrics | None = None,
 ) -> FileResult:
     """Refactor a single file and return before/after plus metadata."""
     metrics = metrics or RunMetrics()
-    plugin = plugin or create_plugin(settings.plugin)
+    if plugins is None:
+        plugins = [plugin] if plugin is not None else create_plugins(settings.plugin)
     before = path.read_text(encoding="utf-8")
     collected = collect_functions(
         before,
@@ -199,7 +209,7 @@ async def process_file(
         fn = item.semantic
         if repo_index is not None:
             fn = repo_index.attach(fn)
-        if plugin.select(fn):
+        if any(p.select(fn) for p in plugins):
             functions.append(fn)
 
     if not functions:
@@ -212,21 +222,39 @@ async def process_file(
 
     async def handle(fn: SemanticFunction) -> None:
         async with semaphore:
-            suggestion = await _suggest_with_retries(
-                plugin,
-                provider,
-                fn,
-                current_source=before,
-                settings=settings,
-                cache=cache,
-                metrics=metrics,
-            )
-            if suggestion is None:
+            merged = Suggestion()
+            got_any = False
+            for plug in plugins:
+                if not plug.select(fn):
+                    continue
+                suggestion = await _suggest_with_retries(
+                    plug,
+                    provider,
+                    fn,
+                    current_source=before,
+                    settings=settings,
+                    cache=cache,
+                    metrics=metrics,
+                )
+                if suggestion is not None:
+                    merged = merge_suggestions(merged, suggestion)
+                    got_any = True
+            if not got_any or merged.is_empty():
                 skipped.append(fn.qualified_name)
                 metrics.functions_skipped += 1
                 errors.append(f"{fn.qualified_name}: failed verification or provider")
             else:
-                updates[fn.qualified_name] = suggestion
+                # Re-verify merged candidate once
+                candidate = apply_suggestion(before, fn.qualified_name, merged)
+                if (
+                    settings.force
+                    or verify_candidate(candidate, fn=fn, suggestion=merged, force=False).ok
+                ):
+                    updates[fn.qualified_name] = merged
+                else:
+                    skipped.append(fn.qualified_name)
+                    metrics.functions_skipped += 1
+                    errors.append(f"{fn.qualified_name}: merged suggestion failed verification")
 
     await asyncio.gather(*(handle(fn) for fn in functions))
 
@@ -270,10 +298,10 @@ async def run_refactor(
     provider: LLMProvider,
     settings: Settings,
 ) -> RefactorReport:
-    """Process many files with a shared RepoIndex, plugin, cache, and metrics."""
+    """Process many files with a shared RepoIndex, plugins, cache, and metrics."""
     report = RefactorReport()
     metrics = report.metrics
-    plugin = create_plugin(settings.plugin)
+    plugins = create_plugins(settings.plugin)
 
     t0 = time.perf_counter()
     repo_index = RepoIndex(paths)
@@ -293,7 +321,7 @@ async def run_refactor(
             provider,
             settings,
             repo_index=repo_index,
-            plugin=plugin,
+            plugins=plugins,
             cache=cache,
             metrics=metrics,
         )

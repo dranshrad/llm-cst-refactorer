@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -100,3 +101,27 @@ def test_plugin_factory() -> None:
     assert plugin.name == "typing-docstring"
     with pytest.raises(ValueError):
         create_plugin("nope")
+
+
+def test_create_plugins_and_init_return_none() -> None:
+    from llm_cst_refactorer.plugins.factory import create_plugins
+    from llm_cst_refactorer.plugins.init_return_none import InitReturnNonePlugin
+    from llm_cst_refactorer.semantic import ParamInfo, SemanticFunction
+
+    plugins = create_plugins("init-return-none,typing-docstring")
+    assert [p.name for p in plugins] == ["init-return-none", "typing-docstring"]
+    init_plugin = InitReturnNonePlugin()
+    fn = SemanticFunction(
+        qualified_name="Counter.__init__",
+        source="def __init__(self, start):\n    self.value = start\n",
+        params=[ParamInfo(name="self", is_self_or_cls=True), ParamInfo(name="start")],
+        return_annotation=None,
+    )
+    assert init_plugin.select(fn)
+
+    async def _run() -> None:
+        sug = await init_plugin.propose(fn, provider=object())  # type: ignore[arg-type]
+        assert sug.return_type is not None
+        assert sug.return_type.value == "None"
+
+    asyncio.run(_run())

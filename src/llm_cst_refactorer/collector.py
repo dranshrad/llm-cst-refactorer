@@ -125,7 +125,7 @@ class AnnotationCollector(cst.CSTVisitor):
             return_ann = self._code_for(node.returns.annotation).strip()
 
         has_return = return_ann is not None
-        needs_return = not has_return and name != "__init__"
+        needs_return = not has_return
         docstring = _extract_docstring(node)
         needs_docstring = docstring is None
 

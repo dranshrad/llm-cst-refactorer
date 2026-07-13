@@ -1,0 +1,56 @@
+--- a/examples/sample_legacy.py
++++ b/examples/sample_legacy.py
+@@ -2,21 +2,49 @@
+ # Intentionally under-annotated / undocumented.
+ 
+ 
+-def greet(name, times=1):
++def greet(name: str, times: int=1) -> str:
++    """Auto-documented `greet`.
++
++Args:
++    See parameters.
++
++Returns:
++    See return value."""
+     # Preserve this comment when refactoring.
+     return ("hello " + name + "! ") * times
+ 
+ 
+ class Counter:
+-    def __init__(self, start):
++    def __init__(self, start: int) -> None:
++        """Auto-documented `Counter.__init__`.
++
++Args:
++    See parameters.
++
++Returns:
++    See return value."""
+         self.value = start
+ 
+-    def bump(self, step):
++    def bump(self, step: int) -> int:
++        """Auto-documented `Counter.bump`.
++
++Args:
++    See parameters.
++
++Returns:
++    See return value."""
+         self.value += step
+         return self.value
+ 
+ 
+-async def fetch_title(url):
++async def fetch_title(url: str) -> str:
++    """Auto-documented `fetch_title`.
++
++Args:
++    See parameters.
++
++Returns:
++    See return value."""
+     return url.rsplit("/", 1)[-1]
+ 
+ 

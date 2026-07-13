@@ -127,8 +127,11 @@ def main(
     ] = 0.5,
     plugin: Annotated[
         str,
-        typer.Option("--plugin", help="Refactor plugin name (default: typing-docstring)."),
-    ] = "typing-docstring",
+        typer.Option(
+            "--plugin",
+            help="Comma-separated plugins (default: init-return-none,typing-docstring).",
+        ),
+    ] = "init-return-none,typing-docstring",
     no_cache: Annotated[
         bool,
         typer.Option("--no-cache", help="Disable filesystem suggestion cache."),
