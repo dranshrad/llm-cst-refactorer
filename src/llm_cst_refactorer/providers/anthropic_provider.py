@@ -5,8 +5,9 @@ from __future__ import annotations
 
 from anthropic import AsyncAnthropic
 
-from llm_cst_refactorer.models import FunctionContext, Suggestion
+from llm_cst_refactorer.models import Suggestion
 from llm_cst_refactorer.prompts import SYSTEM_PROMPT, build_user_prompt, parse_suggestion_json
+from llm_cst_refactorer.semantic import SemanticFunction
 
 
 class AnthropicProvider:
@@ -25,7 +26,7 @@ class AnthropicProvider:
 
     async def suggest(
         self,
-        ctx: FunctionContext,
+        fn: SemanticFunction,
         *,
         repair_errors: str | None = None,
     ) -> Suggestion:
@@ -36,7 +37,7 @@ class AnthropicProvider:
             messages=[
                 {
                     "role": "user",
-                    "content": build_user_prompt(ctx, repair_errors=repair_errors),
+                    "content": build_user_prompt(fn, repair_errors=repair_errors),
                 }
             ],
         )

@@ -80,14 +80,17 @@ class AnnotationApplier(cst.CSTTransformer):
         node = updated
         sug = self._suggestion
 
-        if sug.param_types:
-            node = node.with_changes(params=self._annotate_params(node.params, sug.param_types))
+        param_map = sug.param_type_map()
+        if param_map:
+            node = node.with_changes(params=self._annotate_params(node.params, param_map))
 
-        if sug.return_type and node.returns is None:
-            node = node.with_changes(returns=_parse_annotation(sug.return_type))
+        ret = sug.return_type_value()
+        if ret and node.returns is None:
+            node = node.with_changes(returns=_parse_annotation(ret))
 
-        if sug.docstring and not self._has_docstring(node):
-            node = self._insert_docstring(node, sug.docstring)
+        doc = sug.docstring_value()
+        if doc and not self._has_docstring(node):
+            node = self._insert_docstring(node, doc)
 
         self.applied = True
         return node
@@ -163,8 +166,10 @@ def apply_suggestions(source: str, updates: dict[str, Suggestion]) -> str:
 
 def apply_init_none_return(source: str, qualified_name: str) -> str:
     """Locally annotate ``__init__`` return as ``None`` without an LLM call."""
+    from llm_cst_refactorer.models import FieldSuggestion
+
     return apply_suggestion(
         source,
         qualified_name,
-        Suggestion(return_type="None"),
+        Suggestion(return_type=FieldSuggestion(value="None", confidence=1.0)),
     )

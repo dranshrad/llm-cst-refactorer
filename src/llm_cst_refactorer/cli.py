@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Typer CLI for the LLM Docstring & Typing Auto-Refactorer."""
+"""Typer CLI for the LLM semantic refactoring engine."""
 
 from __future__ import annotations
 
@@ -111,13 +111,36 @@ def main(
         int,
         typer.Option(
             "--max-retries",
-            help="Extra LLM repair attempts after mypy failures.",
+            help="Extra LLM repair attempts after verification failures.",
         ),
     ] = 2,
     force: Annotated[
         bool,
         typer.Option("--force", help="Skip mypy verification gate (discouraged)."),
     ] = False,
+    min_confidence: Annotated[
+        float,
+        typer.Option(
+            "--min-confidence",
+            help="Drop suggestion fields below this confidence (0-1).",
+        ),
+    ] = 0.5,
+    plugin: Annotated[
+        str,
+        typer.Option("--plugin", help="Refactor plugin name (default: typing-docstring)."),
+    ] = "typing-docstring",
+    no_cache: Annotated[
+        bool,
+        typer.Option("--no-cache", help="Disable filesystem suggestion cache."),
+    ] = False,
+    refresh_cache: Annotated[
+        bool,
+        typer.Option("--refresh-cache", help="Clear cache then continue with caching enabled."),
+    ] = False,
+    report: Annotated[
+        Path | None,
+        typer.Option("--report", help="Write machine-readable metrics JSON to PATH."),
+    ] = None,
     verbose: Annotated[
         bool,
         typer.Option("--verbose", "-v", help="Verbose logging."),
@@ -166,6 +189,11 @@ def main(
             max_retries=max_retries,
             force=force,
             verbose=verbose,
+            min_confidence=min_confidence,
+            plugin=plugin,
+            use_cache=not no_cache,
+            refresh_cache=refresh_cache,
+            report_path=report,
         )
         provider = create_provider(settings)
     except ValueError as exc:
@@ -182,13 +210,13 @@ def main(
         raise typer.Exit(0)
 
     console.print(
-        f"Engine={settings.engine.value} model={settings.model} "
+        f"Engine={settings.engine.value} model={settings.model} plugin={settings.plugin} "
         f"files={len(files)} mode={'apply' if settings.apply else 'dry-run'}"
     )
 
-    report = asyncio.run(run_refactor(files, provider, settings))
+    refactor_report = asyncio.run(run_refactor(files, provider, settings))
 
-    for result in report.results:
+    for result in refactor_report.results:
         if result.changed:
             diff = format_file_diff(str(result.path), result.before, result.after)
             typer.echo(diff)
@@ -201,9 +229,12 @@ def main(
 
     mode = "Applied" if settings.apply else "Dry-run"
     console.print(
-        f"{mode}: {report.files_changed} file(s) changed, "
-        f"{report.functions_updated} function(s) updated."
+        f"{mode}: {refactor_report.files_changed} file(s) changed, "
+        f"{refactor_report.functions_updated} function(s) updated."
     )
+    console.print(f"[dim]{refactor_report.metrics.rich_summary()}[/dim]")
+    if settings.report_path is not None:
+        console.print(f"Metrics report written to {settings.report_path}")
 
 
 def app() -> None:
@@ -211,6 +242,5 @@ def app() -> None:
     typer.run(main)
 
 
-# Typer instance for CliRunner tests (mirrors ``typer.run(main)``).
 cli = typer.Typer(add_completion=False)
 cli.command()(main)

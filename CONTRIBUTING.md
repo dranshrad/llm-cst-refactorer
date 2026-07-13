@@ -25,10 +25,12 @@ poetry run pytest
 ## Guidelines
 
 - Prefer LibCST node surgery over string rewriting.
+- Prefer extending `SemanticFunction` / `RefactorPlugin` over special-case CLI logic.
 - Keep dry-run the safe default; never write without `--apply`.
 - Mock LLM providers in unit tests — no network calls in CI.
 - Add SPDX headers: `# SPDX-License-Identifier: AGPL-3.0-or-later`
 - Keep public APIs fully typed.
+- Plugin API version is `"1"` — bump deliberately and document breaking changes.
 
 ## License
 

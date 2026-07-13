@@ -1,0 +1,22 @@
+{
+  "cases": [
+    {
+      "id": "add",
+      "source": "def add(a, b):\n    return a + b\n",
+      "truth": {
+        "param_types": {"a": "int", "b": "int"},
+        "return_type": "int",
+        "docstring_contains": ["Add"]
+      }
+    },
+    {
+      "id": "greet",
+      "source": "def greet(name, times=1):\n    return (\"hello \" + name + \"! \") * times\n",
+      "truth": {
+        "param_types": {"name": "str", "times": "int"},
+        "return_type": "str",
+        "docstring_contains": ["greet"]
+      }
+    }
+  ]
+}

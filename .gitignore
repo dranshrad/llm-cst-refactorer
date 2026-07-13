@@ -45,3 +45,6 @@ coverage.xml
 # Temp verifier artifacts
 .tmp_mypy/
 *.tmp.py
+
+# Suggestion cache
+.llm_cst_cache/

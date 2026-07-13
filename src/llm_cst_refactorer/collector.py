@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Collect FunctionDef nodes that need annotations or docstrings."""
+"""Collect FunctionDef nodes into SemanticFunction IR."""
 
 from __future__ import annotations
 
@@ -9,7 +9,8 @@ import libcst as cst
 import libcst.matchers as m
 from libcst.metadata import PositionProvider
 
-from llm_cst_refactorer.models import FunctionContext, FunctionNeeds
+from llm_cst_refactorer.models import FunctionNeeds
+from llm_cst_refactorer.semantic import ParamInfo, RepoContextSlice, SemanticFunction
 
 SKIP_MARKERS = ("# noqa: llm-cst", "# llm-cst: skip")
 
@@ -18,7 +19,7 @@ SKIP_MARKERS = ("# noqa: llm-cst", "# llm-cst: skip")
 class CollectedFunction:
     """A function that needs LLM-assisted annotation or documentation."""
 
-    context: FunctionContext
+    semantic: SemanticFunction
     node: cst.FunctionDef
     skip: bool = False
 
@@ -91,30 +92,42 @@ class AnnotationCollector(cst.CSTVisitor):
         is_method = any(frame.kind == "class" for frame in self._stack)
         qualified = ".".join([*(f.name for f in self._stack), name])
 
-        params = (
+        raw_params = (
             list(node.params.posonly_params)
             + list(node.params.params)
             + list(node.params.kwonly_params)
         )
         if node.params.star_arg and isinstance(node.params.star_arg, cst.Param):
-            params.append(node.params.star_arg)
+            raw_params.append(node.params.star_arg)
         if node.params.star_kwarg:
-            params.append(node.params.star_kwarg)
+            raw_params.append(node.params.star_kwarg)
 
-        param_names: list[str] = []
+        params: list[ParamInfo] = []
         missing_param_names: list[str] = []
-        for idx, param in enumerate(params):
+        for idx, param in enumerate(raw_params):
             pname = param.name.value
-            param_names.append(pname)
-            if pname in {"self", "cls"} and idx == 0 and is_method:
-                continue
-            if param.annotation is None:
+            is_self = pname in {"self", "cls"} and idx == 0 and is_method
+            ann = None
+            if param.annotation is not None:
+                ann = self._code_for(param.annotation.annotation).strip()
+            info = ParamInfo(
+                name=pname,
+                annotation=ann,
+                has_default=param.default is not None,
+                is_self_or_cls=is_self,
+            )
+            params.append(info)
+            if not is_self and ann is None:
                 missing_param_names.append(pname)
 
-        has_return = node.returns is not None
+        return_ann = None
+        if node.returns is not None:
+            return_ann = self._code_for(node.returns.annotation).strip()
+
+        has_return = return_ann is not None
         needs_return = not has_return and name != "__init__"
-        has_docstring = _has_docstring(node)
-        needs_docstring = not has_docstring
+        docstring = _extract_docstring(node)
+        needs_docstring = docstring is None
 
         needs = FunctionNeeds(
             needs_params=bool(missing_param_names),
@@ -143,22 +156,23 @@ class AnnotationCollector(cst.CSTVisitor):
         if class_frames:
             class_context = class_frames[-1].name
 
-        ctx = FunctionContext(
+        semantic = SemanticFunction(
             qualified_name=qualified,
-            function_source=self._code_for(node),
-            module_preamble=self._module_preamble,
-            class_context=class_context,
-            param_names=param_names,
-            missing_param_names=missing_param_names,
-            has_return_annotation=has_return,
-            has_docstring=has_docstring,
-            is_async=is_async,
-            is_method=is_method,
-            needs=needs,
             file_path=self._file_path,
             lineno=lineno,
-        )
-        self.collected.append(CollectedFunction(context=ctx, node=node))
+            is_async=is_async,
+            is_method=is_method,
+            source=self._code_for(node),
+            params=params,
+            return_annotation=return_ann,
+            docstring=docstring,
+            needs=needs,
+            repo_context=RepoContextSlice(
+                module_preamble=self._module_preamble,
+                class_context=class_context,
+            ),
+        ).with_fingerprint()
+        self.collected.append(CollectedFunction(semantic=semantic, node=node))
 
     def _is_skipped(self, lineno: int) -> bool:
         if lineno <= 0:
@@ -177,15 +191,17 @@ class AnnotationCollector(cst.CSTVisitor):
         return cst.Module([]).code_for_node(node)
 
 
-def _has_docstring(node: cst.FunctionDef) -> bool:
+def _extract_docstring(node: cst.FunctionDef) -> str | None:
     body = node.body
     if not isinstance(body, cst.IndentedBlock) or not body.body:
-        return False
+        return None
     first = body.body[0]
     if not isinstance(first, cst.SimpleStatementLine) or not first.body:
-        return False
+        return None
     stmt = first.body[0]
-    return isinstance(stmt, cst.Expr) and isinstance(stmt.value, cst.BaseString)
+    if isinstance(stmt, cst.Expr) and isinstance(stmt.value, cst.BaseString):
+        return cst.Module([]).code_for_node(stmt.value).strip().strip("\"'")
+    return None
 
 
 def collect_functions(

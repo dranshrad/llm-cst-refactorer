@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from typing import Literal
 
 from dotenv import load_dotenv
@@ -47,6 +48,12 @@ class Settings:
     verbose: bool
     anthropic_api_key: str | None
     openai_api_key: str | None
+    min_confidence: float
+    plugin: str
+    use_cache: bool
+    refresh_cache: bool
+    cache_dir: Path
+    report_path: Path | None
 
 
 def load_settings(
@@ -64,6 +71,12 @@ def load_settings(
     max_retries: int = 2,
     force: bool = False,
     verbose: bool = False,
+    min_confidence: float = 0.5,
+    plugin: str = "typing-docstring",
+    use_cache: bool = True,
+    refresh_cache: bool = False,
+    cache_dir: Path | None = None,
+    report_path: Path | None = None,
 ) -> Settings:
     """Load dotenv and merge CLI overrides with environment defaults."""
     load_dotenv()
@@ -87,6 +100,7 @@ def load_settings(
         "**/.mypy_cache/**",
         "**/.ruff_cache/**",
         "**/node_modules/**",
+        "**/.llm_cst_cache/**",
     ]
 
     return Settings(
@@ -105,4 +119,10 @@ def load_settings(
         verbose=verbose,
         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY") or None,
         openai_api_key=os.getenv("OPENAI_API_KEY") or None,
+        min_confidence=min(1.0, max(0.0, min_confidence)),
+        plugin=plugin,
+        use_cache=use_cache and not refresh_cache,
+        refresh_cache=refresh_cache,
+        cache_dir=cache_dir or Path(".llm_cst_cache"),
+        report_path=report_path,
     )

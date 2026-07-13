@@ -1,21 +1,28 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Async coordinator: collect → LLM suggest → mypy verify → apply."""
+"""Async coordinator: index → collect → plugin/LLM → verify → apply."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from llm_cst_refactorer.cache import SuggestionCache
 from llm_cst_refactorer.collector import collect_functions
 from llm_cst_refactorer.config import Settings
 from llm_cst_refactorer.diff_util import format_file_diff
-from llm_cst_refactorer.models import FunctionContext, Suggestion
-from llm_cst_refactorer.prompts import parse_suggestion_json
+from llm_cst_refactorer.metrics import RunMetrics
+from llm_cst_refactorer.models import Suggestion
+from llm_cst_refactorer.plugins.base import RefactorPlugin
+from llm_cst_refactorer.plugins.factory import create_plugin
+from llm_cst_refactorer.prompts import build_user_prompt, parse_suggestion_json
 from llm_cst_refactorer.providers.base import LLMProvider
+from llm_cst_refactorer.repo_index import RepoIndex
+from llm_cst_refactorer.semantic import SemanticFunction
 from llm_cst_refactorer.transformer import apply_suggestion, apply_suggestions
-from llm_cst_refactorer.type_verifier import verify_source
+from llm_cst_refactorer.verification.pipeline import verify_candidate
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +51,7 @@ class RefactorReport:
     """Aggregate report across all processed files."""
 
     results: list[FileResult] = field(default_factory=list)
+    metrics: RunMetrics = field(default_factory=RunMetrics)
 
     @property
     def files_changed(self) -> int:
@@ -54,69 +62,112 @@ class RefactorReport:
         return sum(len(r.functions_updated) for r in self.results)
 
 
-def _filter_suggestion(ctx: FunctionContext, suggestion: Suggestion) -> Suggestion:
+def _filter_suggestion(fn: SemanticFunction, suggestion: Suggestion) -> Suggestion:
     """Keep only fields that were requested and relevant."""
     param_types = {
-        name: ann for name, ann in suggestion.param_types.items() if name in ctx.missing_param_names
+        name: field
+        for name, field in suggestion.param_types.items()
+        if name in fn.missing_param_names
     }
-    return_type = suggestion.return_type if ctx.needs.needs_return else None
-    docstring = suggestion.docstring if ctx.needs.needs_docstring else None
+    return_type = suggestion.return_type if fn.needs.needs_return else None
+    docstring = suggestion.docstring if fn.needs.needs_docstring else None
     return Suggestion(param_types=param_types, return_type=return_type, docstring=docstring)
 
 
 async def _suggest_with_retries(
+    plugin: RefactorPlugin,
     provider: LLMProvider,
-    ctx: FunctionContext,
+    fn: SemanticFunction,
     *,
     current_source: str,
-    max_retries: int,
-    force: bool,
+    settings: Settings,
+    cache: SuggestionCache | None,
+    metrics: RunMetrics,
 ) -> Suggestion | None:
-    """Ask the provider, verify with mypy, and optionally repair."""
+    """Ask the plugin/provider, verify with pipeline, and optionally repair."""
+    engine = settings.engine.value
+    model = settings.model
+    plugin_name = plugin.name
+
+    if cache is not None and settings.use_cache and not settings.refresh_cache:
+        cached = cache.get(fn, engine=engine, model=model, plugin=plugin_name)
+        if cached is not None:
+            metrics.cache_hits += 1
+            filtered = _filter_suggestion(fn, cached).filter_by_confidence(settings.min_confidence)
+            if filtered.is_empty():
+                return None
+            candidate = apply_suggestion(current_source, fn.qualified_name, filtered)
+            verification = verify_candidate(
+                candidate, fn=fn, suggestion=filtered, force=settings.force
+            )
+            if verification.ok or settings.force:
+                metrics.verify_pass += 1
+                return filtered
+            metrics.verify_fail += 1
+            # fall through to regenerate
+        else:
+            metrics.cache_misses += 1
+    elif cache is not None:
+        metrics.cache_misses += 1
+
     repair_errors: str | None = None
-    attempts = max_retries + 1
+    attempts = settings.max_retries + 1
     last_error = ""
 
     for attempt in range(attempts):
         try:
-            raw_suggestion = await provider.suggest(ctx, repair_errors=repair_errors)
+            t0 = time.perf_counter()
+            prompt_chars = len(build_user_prompt(fn, repair_errors=repair_errors))
+            raw_suggestion = await plugin.propose(fn, provider, repair=repair_errors)
+            metrics.llm_calls += 1
+            if attempt > 0:
+                metrics.llm_retries += 1
+            metrics.estimated_prompt_chars += prompt_chars
+            metrics.estimated_completion_chars += len(raw_suggestion.model_dump_json())
+            metrics.add_stage("llm", time.perf_counter() - t0)
         except Exception as exc:
             last_error = f"provider error: {exc}"
-            logger.warning("%s: %s", ctx.qualified_name, last_error)
-            # One parse/repair style retry is handled by attempts loop when JSON fails
+            logger.warning("%s: %s", fn.qualified_name, last_error)
             if attempt + 1 >= attempts:
                 return None
             repair_errors = last_error
             continue
 
-        suggestion = _filter_suggestion(ctx, raw_suggestion)
-        if (
-            not suggestion.param_types
-            and suggestion.return_type is None
-            and suggestion.docstring is None
-        ):
-            last_error = "empty suggestion after filtering"
-            logger.warning("%s: %s", ctx.qualified_name, last_error)
+        suggestion = _filter_suggestion(fn, raw_suggestion).filter_by_confidence(
+            settings.min_confidence
+        )
+        if suggestion.is_empty():
+            last_error = "empty suggestion after filtering / confidence gate"
+            logger.warning("%s: %s", fn.qualified_name, last_error)
             return None
 
-        candidate = apply_suggestion(current_source, ctx.qualified_name, suggestion)
-        if force:
+        candidate = apply_suggestion(current_source, fn.qualified_name, suggestion)
+        if settings.force:
+            if cache is not None:
+                cache.put(fn, suggestion, engine=engine, model=model, plugin=plugin_name)
+            metrics.verify_pass += 1
             return suggestion
 
-        verification = verify_source(candidate)
+        t1 = time.perf_counter()
+        verification = verify_candidate(candidate, fn=fn, suggestion=suggestion, force=False)
+        metrics.add_stage("verify", time.perf_counter() - t1)
         if verification.ok:
+            metrics.verify_pass += 1
+            if cache is not None:
+                cache.put(fn, suggestion, engine=engine, model=model, plugin=plugin_name)
             return suggestion
 
-        last_error = verification.errors
-        repair_errors = verification.errors
+        metrics.verify_fail += 1
+        last_error = verification.format_for_repair()
+        repair_errors = last_error
         logger.info(
-            "mypy rejected suggestion for %s (attempt %s/%s)",
-            ctx.qualified_name,
+            "verification rejected suggestion for %s (attempt %s/%s)",
+            fn.qualified_name,
             attempt + 1,
             attempts,
         )
 
-    logger.warning("Giving up on %s: %s", ctx.qualified_name, last_error)
+    logger.warning("Giving up on %s: %s", fn.qualified_name, last_error)
     return None
 
 
@@ -124,16 +175,34 @@ async def process_file(
     path: Path,
     provider: LLMProvider,
     settings: Settings,
+    *,
+    repo_index: RepoIndex | None = None,
+    plugin: RefactorPlugin | None = None,
+    cache: SuggestionCache | None = None,
+    metrics: RunMetrics | None = None,
 ) -> FileResult:
     """Refactor a single file and return before/after plus metadata."""
+    metrics = metrics or RunMetrics()
+    plugin = plugin or create_plugin(settings.plugin)
     before = path.read_text(encoding="utf-8")
     collected = collect_functions(
         before,
-        file_path=str(path),
+        file_path=str(path.resolve()),
         types_only=settings.types_only,
         docs_only=settings.docs_only,
     )
     if not collected:
+        return FileResult(path=path, before=before, after=before, changed=False)
+
+    functions: list[SemanticFunction] = []
+    for item in collected:
+        fn = item.semantic
+        if repo_index is not None:
+            fn = repo_index.attach(fn)
+        if plugin.select(fn):
+            functions.append(fn)
+
+    if not functions:
         return FileResult(path=path, before=before, after=before, changed=False)
 
     semaphore = asyncio.Semaphore(settings.concurrency)
@@ -141,22 +210,25 @@ async def process_file(
     skipped: list[str] = []
     errors: list[str] = []
 
-    async def handle(ctx: FunctionContext) -> None:
+    async def handle(fn: SemanticFunction) -> None:
         async with semaphore:
             suggestion = await _suggest_with_retries(
+                plugin,
                 provider,
-                ctx,
+                fn,
                 current_source=before,
-                max_retries=settings.max_retries,
-                force=settings.force,
+                settings=settings,
+                cache=cache,
+                metrics=metrics,
             )
             if suggestion is None:
-                skipped.append(ctx.qualified_name)
-                errors.append(f"{ctx.qualified_name}: failed verification or provider")
+                skipped.append(fn.qualified_name)
+                metrics.functions_skipped += 1
+                errors.append(f"{fn.qualified_name}: failed verification or provider")
             else:
-                updates[ctx.qualified_name] = suggestion
+                updates[fn.qualified_name] = suggestion
 
-    await asyncio.gather(*(handle(item.context) for item in collected))
+    await asyncio.gather(*(handle(fn) for fn in functions))
 
     if not updates:
         return FileResult(
@@ -169,9 +241,8 @@ async def process_file(
         )
 
     after = apply_suggestions(before, updates)
-    # Final whole-file verification unless forced
     if not settings.force:
-        final = verify_source(after)
+        final = verify_candidate(after, force=False)
         if not final.ok:
             return FileResult(
                 path=path,
@@ -179,9 +250,10 @@ async def process_file(
                 after=before,
                 changed=False,
                 skipped=[*skipped, *updates.keys()],
-                errors=[*errors, f"final mypy failed: {final.errors}"],
+                errors=[*errors, f"final verification failed: {final.errors}"],
             )
 
+    metrics.functions_updated += len(updates)
     return FileResult(
         path=path,
         before=before,
@@ -198,13 +270,40 @@ async def run_refactor(
     provider: LLMProvider,
     settings: Settings,
 ) -> RefactorReport:
-    """Process many files sequentially (LLM calls inside each file are concurrent)."""
+    """Process many files with a shared RepoIndex, plugin, cache, and metrics."""
     report = RefactorReport()
+    metrics = report.metrics
+    plugin = create_plugin(settings.plugin)
+
+    t0 = time.perf_counter()
+    repo_index = RepoIndex(paths)
+    metrics.add_stage("index", time.perf_counter() - t0)
+
+    cache: SuggestionCache | None = None
+    if settings.use_cache or settings.refresh_cache:
+        cache = SuggestionCache(settings.cache_dir)
+        if settings.refresh_cache:
+            cache.clear()
+
     for path in paths:
         if settings.verbose:
             logger.info("Processing %s", path)
-        result = await process_file(path, provider, settings)
+        result = await process_file(
+            path,
+            provider,
+            settings,
+            repo_index=repo_index,
+            plugin=plugin,
+            cache=cache,
+            metrics=metrics,
+        )
         report.results.append(result)
+        if result.changed:
+            metrics.files_changed += 1
+
+    metrics.finish()
+    if settings.report_path is not None:
+        metrics.write_json(settings.report_path)
     return report
 
 

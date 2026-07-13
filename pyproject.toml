@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "llm-cst-refactorer"
-version = "0.1.0"
+version = "0.2.0"
 description = "Format-preserving LLM docstring and type-hint auto-refactorer powered by LibCST."
 authors = ["Divyansh Gupta <divyanshgupta@users.noreply.github.com>"]
 license = "AGPL-3.0-or-later"

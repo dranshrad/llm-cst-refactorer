@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Tests for provider factory and JSON parsing."""
+"""Tests for provider factory and JSON parsing with confidence."""
 
 from __future__ import annotations
 
@@ -14,12 +14,27 @@ from llm_cst_refactorer.providers.openai_provider import OpenAIProvider
 def test_parse_suggestion_json_plain_and_fenced() -> None:
     plain = '{"param_types": {"a": "int"}, "return_type": "int", "docstring": "Add."}'
     sug = parse_suggestion_json(plain)
-    assert sug.param_types["a"] == "int"
-    assert sug.return_type == "int"
+    assert sug.param_types["a"].value == "int"
+    assert sug.param_types["a"].confidence == 0.7
+    assert sug.return_type is not None
+    assert sug.return_type.value == "int"
 
     fenced = '```json\n{"param_types": {}, "return_type": null, "docstring": null}\n```'
     sug2 = parse_suggestion_json(fenced)
     assert sug2.return_type is None
+
+
+def test_parse_structured_confidence() -> None:
+    raw = """{
+      "param_types": {
+        "a": {"value": "int", "confidence": 0.95, "evidence": ["literal add"]}
+      },
+      "return_type": {"value": "int", "confidence": 0.9, "evidence": ["return a+b"]},
+      "docstring": null
+    }"""
+    sug = parse_suggestion_json(raw)
+    assert sug.param_types["a"].confidence == 0.95
+    assert sug.param_types["a"].evidence == ["literal add"]
 
 
 def test_compatible_requires_base_url() -> None:

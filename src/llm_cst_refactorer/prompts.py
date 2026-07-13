@@ -5,14 +5,25 @@ from __future__ import annotations
 
 import json
 
-from llm_cst_refactorer.models import FunctionContext, Suggestion
+from llm_cst_refactorer.models import Suggestion
+from llm_cst_refactorer.semantic import PROMPT_VERSION, SemanticFunction
 
-SYSTEM_PROMPT = """\
+SYSTEM_PROMPT = (
+    """\
 You are a senior Python typing and documentation assistant.
-Given a function and optional module context, return ONLY a JSON object with:
-- "param_types": object mapping parameter names to Python type annotation strings
-- "return_type": a Python return annotation string, or null if not needed
-- "docstring": a Google-style docstring body WITHOUT surrounding triple quotes, or null
+Given a SemanticFunction payload (source + repository context), return ONLY JSON:
+
+{
+  "param_types": {
+    "name": {"value": "str", "confidence": 0.0-1.0, "evidence": ["..."]}
+  },
+  "return_type": {"value": "int", "confidence": 0.9, "evidence": ["..."]} | null,
+  "docstring": {
+    "value": "Google-style body WITHOUT triple quotes",
+    "confidence": 0.8,
+    "evidence": ["..."]
+  } | null
+}
 
 Rules:
 1. Output valid JSON only. No markdown fences, no commentary.
@@ -21,33 +32,24 @@ Rules:
 4. Skip annotating self/cls.
 5. Google docstring sections when useful: Args, Returns, Raises, Yields.
 6. Keep the docstring accurate and concise; do not invent undocumented side effects.
-7. Prefer existing names from the module preamble when choosing types.
-"""
+7. Prefer names/types from repo_context.imported_names and convention_hints.
+8. confidence must reflect certainty; cite short evidence strings.
+9. Prompt schema version: """
+    + PROMPT_VERSION
+    + "\n"
+)
 
 
-def build_user_prompt(ctx: FunctionContext, *, repair_errors: str | None = None) -> str:
+def build_user_prompt(fn: SemanticFunction, *, repair_errors: str | None = None) -> str:
     """Build the user message for suggestion or repair."""
-    payload = {
-        "qualified_name": ctx.qualified_name,
-        "file_path": ctx.file_path,
-        "is_async": ctx.is_async,
-        "is_method": ctx.is_method,
-        "param_names": ctx.param_names,
-        "missing_param_names": ctx.missing_param_names,
-        "has_return_annotation": ctx.has_return_annotation,
-        "has_docstring": ctx.has_docstring,
-        "needs": ctx.needs.model_dump(),
-        "module_preamble": ctx.module_preamble,
-        "class_context": ctx.class_context,
-        "function_source": ctx.function_source,
-    }
+    payload = fn.prompt_payload()
     parts = [
-        "Analyze this function and return JSON matching the schema.",
+        "Analyze this SemanticFunction and return JSON matching the schema.",
         json.dumps(payload, indent=2),
     ]
     if repair_errors:
         parts.append(
-            "The previous suggestion failed mypy with these errors. "
+            "The previous suggestion failed verification with these errors. "
             "Return a corrected JSON suggestion:\n"
             f"{repair_errors}"
         )

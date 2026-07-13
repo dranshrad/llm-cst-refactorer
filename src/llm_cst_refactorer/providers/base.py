@@ -5,7 +5,8 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-from llm_cst_refactorer.models import FunctionContext, Suggestion
+from llm_cst_refactorer.models import Suggestion
+from llm_cst_refactorer.semantic import SemanticFunction
 
 
 @runtime_checkable
@@ -14,9 +15,9 @@ class LLMProvider(Protocol):
 
     async def suggest(
         self,
-        ctx: FunctionContext,
+        fn: SemanticFunction,
         *,
         repair_errors: str | None = None,
     ) -> Suggestion:
-        """Return a structured suggestion for ``ctx``."""
+        """Return a structured suggestion for ``fn``."""
         ...

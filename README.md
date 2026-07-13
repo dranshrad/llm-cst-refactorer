@@ -1,40 +1,56 @@
-# LLM Docstring & Typing Auto-Refactorer
+# LLM CST Refactorer — AI Semantic Transformation Engine
 
-Format-preserving Python refactorer that adds **missing type hints** and **Google-style docstrings** using [LibCST](https://libcst.readthedocs.io/) and an LLM — without destroying comments, spacing, or layout the way a naive AST round-trip would.
+Format-preserving Python **semantic refactorer** that adds missing type hints and Google-style docstrings using [LibCST](https://libcst.readthedocs.io/) and an LLM — without destroying comments, spacing, or layout.
 
-Licensed under the **GNU Affero General Public License v3 or later (AGPL-3.0-or-later)**.
+Licensed under **AGPL-3.0-or-later**.
+
+> **Identity (v0.2):** not just an annotation inserter — a trustworthy semantic transformation engine for Python. Typing + docstrings are the first plugins on a shared `SemanticFunction` IR.
 
 ## Why LibCST?
 
-Regex and string splicing break syntax. `ast` is safe to *read* but rewriting with `ast.unparse` drops formatting and comments. **LibCST** keeps the concrete syntax tree intact and only mutates the nodes you target.
+Regex breaks syntax. `ast.unparse` drops formatting. **LibCST** keeps the concrete syntax tree intact and only mutates targeted nodes.
 
-## Features
+## Architecture
 
-- **CST transformers** — observe with a visitor, apply with `CSTTransformer`
-- **Pluggable LLM engines** — Anthropic, OpenAI, or OpenAI-compatible (`base_url` for Ollama / vLLM / LocalAI)
-- **mypy gate** — generated annotations are verified before write (repair retries supported)
-- **Dry-run by default** — Git-style colored unified diffs; require `--apply` to write
-- **Skip markers** — `# llm-cst: skip` or `# noqa: llm-cst` on/above a definition
-- **Strict packaging** — Poetry, Ruff, mypy strict, pytest CI
+```mermaid
+flowchart TD
+  Scan[scanner] --> Index[RepoIndex]
+  Index --> Collect[collector to SemanticFunction]
+  Collect --> Cache{suggestion cache}
+  Cache -->|miss| Plugin[TypingDocstringPlugin]
+  Plugin --> LLM[LLMProvider JSON]
+  LLM --> Verify[VerifierPipeline]
+  Verify -->|fail| Repair[repair loop]
+  Repair --> LLM
+  Verify -->|pass| Apply[CST AnnotationApplier]
+  Cache -->|hit| Apply
+  Apply --> Metrics[RunMetrics]
+```
 
-## Install (from source)
+Pipeline stages: **index → collect IR → cache → plugin/LLM → multi-stage verify → CST apply → metrics/diff**.
+
+## Features (v0.2)
+
+- **SemanticFunction IR** — shared representation for plugins, prompts, cache, metrics
+- **RepoIndex** — imports, neighbors, convention hints before prompting
+- **Confidence + evidence** — structured JSON fields with `--min-confidence`
+- **VerifierPipeline** — syntax → schema → mypy, with stage-tagged repair
+- **Plugin API** — `RefactorPlugin` Protocol (`typing-docstring` default)
+- **Suggestion cache** — `.llm_cst_cache/` (skip LLM, still verify)
+- **RunMetrics** — wall time, LLM calls, cache hits, verify rate, `--report`
+- **Dry-run by default** — Git-style colored diffs; `--apply` to write
+- **Skip markers** — `# llm-cst: skip` / `# noqa: llm-cst`
+
+## Install
 
 Requires Python 3.11+.
 
 ```bash
-git clone https://github.com/divyanshgupta/llm-cst-refactorer.git
+git clone https://github.com/dranshrad/llm-cst-refactorer.git
 cd llm-cst-refactorer
 poetry install
 poetry run llm-cst-refactor --help
 ```
-
-Editable install without Poetry:
-
-```bash
-pip install -e ".[dev]"   # after exporting/using pyproject extras, or: poetry export
-```
-
-PyPI publishing is prepared via `pyproject.toml` metadata but **not published** in this initial release.
 
 ## Quickstart
 
@@ -42,102 +58,97 @@ PyPI publishing is prepared via `pyproject.toml` metadata but **not published** 
 cp .env.example .env
 # set ANTHROPIC_API_KEY or OPENAI_API_KEY
 
-# Preview only (default)
 poetry run llm-cst-refactor examples/sample_legacy.py --engine anthropic
-
-# Write changes
-poetry run llm-cst-refactor examples/sample_legacy.py --engine anthropic --apply
+poetry run llm-cst-refactor examples/sample_legacy.py --engine anthropic --apply --report metrics.json
 ```
 
-Example dry-run output shape:
+### Before / after (`examples/sample_legacy.py`)
 
-```diff
---- a/examples/sample_legacy.py
-+++ b/examples/sample_legacy.py
-@@ -1,6 +1,12 @@
--def greet(name, times=1):
-+def greet(name: str, times: int = 1) -> str:
-+    """Return a repeated greeting.
-+
-+    Args:
-+        name: Person to greet.
-+        times: Repetition count.
-+    """
-     # Preserve this comment when refactoring.
-     return ("hello " + name + "! ") * times
+**Before**
+
+```python
+def greet(name, times=1):
+    # Preserve this comment when refactoring.
+    return ("hello " + name + "! ") * times
+```
+
+**After (illustrative)**
+
+```python
+def greet(name: str, times: int = 1) -> str:
+    """Return a repeated greeting.
+
+    Args:
+        name: Person to greet.
+        times: Repetition count.
+    """
+    # Preserve this comment when refactoring.
+    return ("hello " + name + "! ") * times
 ```
 
 ## Providers
 
-| `--engine`     | Auth                         | Notes |
-|----------------|------------------------------|-------|
-| `anthropic`    | `ANTHROPIC_API_KEY`          | Default model `claude-sonnet-4-20250514` |
-| `openai`       | `OPENAI_API_KEY`             | Default model `gpt-4.1-mini` |
-| `compatible`   | `OPENAI_API_KEY` (optional)  | Requires `--base-url` / `LLM_CST_BASE_URL` |
+| `--engine`   | Auth                | Notes |
+|--------------|---------------------|-------|
+| `anthropic`  | `ANTHROPIC_API_KEY` | Default model `claude-sonnet-4-20250514` |
+| `openai`     | `OPENAI_API_KEY`    | Default model `gpt-4.1-mini` |
+| `compatible` | `OPENAI_API_KEY`    | Requires `--base-url` (Ollama/vLLM/LocalAI) |
 
-Ollama example:
-
-```bash
-export LLM_CST_BASE_URL=http://localhost:11434/v1
-export OPENAI_API_KEY=ollama
-poetry run llm-cst-refactor ./src --engine compatible --model llama3.2
-```
-
-## CLI
+## CLI highlights
 
 ```text
 llm-cst-refactor PATH
   --engine anthropic|openai|compatible
-  --model TEXT
-  --base-url TEXT
-  --apply / --dry-run          # dry-run is the default
-  --concurrency INT
-  --include / --exclude GLOB
-  --docstring-style google
+  --plugin typing-docstring
+  --min-confidence 0.5
+  --apply / --dry-run
+  --no-cache / --refresh-cache
+  --report metrics.json
   --types-only / --docs-only
-  --max-retries INT
-  --force                      # skip mypy (discouraged)
-  --verbose
+  --force
 ```
 
-Env vars: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `LLM_CST_BASE_URL`, `LLM_CST_ENGINE`, `LLM_CST_MODEL`.
+## Plugins
 
-## Safety model
+Implement `RefactorPlugin` (`select` + `propose`) against `SemanticFunction` and register in `plugins/factory.py`. API version: **1**.
 
-1. **Dry-run default** — nothing is written unless `--apply`
-2. **mypy verification** — per-function candidates and a final whole-file check
-3. **Skip comments** — opt out of specific definitions
-4. **Structured JSON** — LLM must return validated `Suggestion` payloads
+## Benchmarks
 
-## Architecture
+Offline oracle suite (CI-safe, no live LLM):
 
-```text
-scan → LibCST collect → LLM suggest → mypy verify → CST apply → diff / write
+```bash
+poetry run python -m benchmarks.run
 ```
+
+Live-model evals: point the same corpus at a real provider locally (not run in CI).
+
+## Safety
+
+1. Dry-run default  
+2. Multi-stage verification (syntax / schema / mypy)  
+3. Confidence gate  
+4. Skip comments  
+5. Cache hits still re-verified before apply  
 
 ## Development
 
 ```bash
 poetry install
-poetry run ruff check src tests
-poetry run ruff format src tests
+poetry run ruff check src tests benchmarks
+poetry run ruff format src tests benchmarks
 poetry run mypy
 poetry run pytest
+poetry run python -m benchmarks.run
 ```
 
-## Roadmap (not in v1)
+## Roadmap
 
-- Class attribute inference
-- Stub (`.pyi`) emission
-- Additional docstring styles
-- CI bot / PR review mode
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md). By contributing, you agree that your contributions are licensed under AGPL-3.0-or-later.
+- Call-graph / interprocedural reasoning
+- Pyright verification stage
+- Additional plugins (rename, complexity, security)
+- Larger open-source precision corpora
+- IDE / CI bot integrations
 
 ## License
 
-This project is free software under the [GNU Affero General Public License v3.0 or later](LICENSE).
-
-If you modify this program and provide it to users over a network (including as a hosted service), AGPL requires that you also provide them the corresponding source under the same license.
+[GNU Affero General Public License v3.0 or later](LICENSE). Network use of modified versions requires offering corresponding source.
