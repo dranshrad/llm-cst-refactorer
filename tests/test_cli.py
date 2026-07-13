@@ -72,7 +72,7 @@ def test_cli_help() -> None:
 def test_cli_version() -> None:
     result = runner.invoke(cli, ["--version"])
     assert result.exit_code == 0
-    assert "0.2.1" in result.stdout
+    assert "0.2.2" in result.stdout
 
 
 def test_cli_requires_api_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

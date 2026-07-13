@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "llm-cst-refactorer"
-version = "0.2.1"
+version = "0.2.2"
 description = "Format-preserving LLM docstring and type-hint auto-refactorer powered by LibCST."
 authors = ["Divyansh Gupta <divyanshgupta@users.noreply.github.com>"]
 license = "AGPL-3.0-or-later"
@@ -19,12 +19,12 @@ classifiers = [
     "Topic :: Software Development :: Quality Assurance",
     "Typing :: Typed",
 ]
-repository = "https://github.com/divyanshgupta/llm-cst-refactorer"
-homepage = "https://github.com/divyanshgupta/llm-cst-refactorer"
-documentation = "https://github.com/divyanshgupta/llm-cst-refactorer#readme"
+repository = "https://github.com/dranshrad/llm-cst-refactorer"
+homepage = "https://github.com/dranshrad/llm-cst-refactorer"
+documentation = "https://github.com/dranshrad/llm-cst-refactorer#readme"
 
 [tool.poetry.urls]
-"Bug Tracker" = "https://github.com/divyanshgupta/llm-cst-refactorer/issues"
+"Bug Tracker" = "https://github.com/dranshrad/llm-cst-refactorer/issues"
 
 [tool.poetry.scripts]
 llm-cst-refactor = "llm_cst_refactorer.cli:app"

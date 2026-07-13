@@ -52,6 +52,15 @@ poetry install
 poetry run llm-cst-refactor --help
 ```
 
+## Demo
+
+```bash
+asciinema play docs/demo/dry-run-diff.cast
+# golden unified diff: examples/captured/sample_legacy.unified.diff
+```
+
+See [docs/demo/dry-run-diff.md](docs/demo/dry-run-diff.md).
+
 ## Quickstart
 
 ```bash
@@ -114,7 +123,7 @@ Full golden file: [`examples/captured/sample_legacy.unified.diff`](examples/capt
 | `--engine`   | Auth                | Notes |
 |--------------|---------------------|-------|
 | `anthropic`  | `ANTHROPIC_API_KEY` | Default model `claude-sonnet-5` |
-| `openai`     | `OPENAI_API_KEY`    | Default model `gpt-5-mini` |
+| `openai`     | `OPENAI_API_KEY`    | Default model `gpt-5.6-luna` (use `gpt-5.6-terra` for harder files; `gpt-5.6` / `gpt-5.6-sol` for flagship) |
 | `compatible` | `OPENAI_API_KEY`    | Requires `--base-url` (Ollama/vLLM/LocalAI) |
 
 ## CLI highlights
@@ -179,4 +188,14 @@ poetry run python -m benchmarks.run
 
 ## License
 
-[GNU Affero General Public License v3.0 or later](LICENSE). Network use of modified versions requires offering corresponding source.
+[GNU Affero General Public License v3.0 or later](LICENSE). Network use of modified versions requires offering corresponding source. That is a deliberate copyleft choice for this suite — not an unexamined default.
+
+## Related projects
+
+| Project | Role |
+|---|---|
+| [codex-ast-mapper](https://github.com/dranshrad/codex-ast-mapper) | Compress repositories into token-budgeted LLM context |
+| [llm-cst-refactorer](https://github.com/dranshrad/llm-cst-refactorer) | Format-preserving typing & docstring refactors |
+| [automated-self-correction-loop](https://github.com/dranshrad/automated-self-correction-loop) (ASCL) | Execute → diagnose → heal loop |
+| [voice-notes-to-anthropic-artifacts](https://github.com/dranshrad/voice-notes-to-anthropic-artifacts) | Local STT → Anthropic → `~/Artifacts` |
+| [anthropic-audio-gateway](https://github.com/dranshrad/anthropic-audio-gateway) | Browser audio ↔ realtime provider adapters |

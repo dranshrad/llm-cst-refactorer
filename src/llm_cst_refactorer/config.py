@@ -23,9 +23,10 @@ class Engine(str, Enum):
 
 
 # Reviewed periodically; override with --model / LLM_CST_MODEL.
+# OpenAI: gpt-5.6-luna (default, high-volume); use gpt-5.6-terra for harder files.
 DEFAULT_MODELS: dict[Engine, str] = {
     Engine.ANTHROPIC: "claude-sonnet-5",
-    Engine.OPENAI: "gpt-5-mini",
+    Engine.OPENAI: "gpt-5.6-luna",
     Engine.COMPATIBLE: "llama3.2",
 }
 
