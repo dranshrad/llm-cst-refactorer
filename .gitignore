@@ -1,0 +1,47 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Poetry
+poetry.toml
+
+# Testing / coverage
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+coverage.xml
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+*.sublime-*
+
+# Env / secrets
+.env
+.env.local
+*.pem
+
+# Netlify / local tooling
+.netlify/
+
+# Temp verifier artifacts
+.tmp_mypy/
+*.tmp.py
