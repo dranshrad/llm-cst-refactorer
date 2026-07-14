@@ -9,3 +9,9 @@ poetry run llm-cst-refactor examples/sample_legacy.py --dry-run
 ```bash
 asciinema play docs/demo/dry-run-diff.cast
 ```
+
+Regenerate the README GIF (requires [`agg`](https://github.com/asciinema/agg)):
+
+```bash
+agg --speed 1.5 --font-size 14 --theme monokai docs/demo/dry-run-diff.cast docs/demo/dry-run-diff.gif
+```

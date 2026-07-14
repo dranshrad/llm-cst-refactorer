@@ -1,3 +1,5 @@
+![60s proof: dry-run CST diff — types + Google docstrings, layout preserved](docs/demo/dry-run-diff.gif)
+
 # LLM CST Refactorer — AI Semantic Transformation Engine
 
 Format-preserving Python **semantic refactorer** that adds missing type hints and Google-style docstrings using [LibCST](https://libcst.readthedocs.io/) and an LLM — without destroying comments, spacing, or layout.
@@ -57,6 +59,7 @@ poetry run llm-cst-refactor --help
 ```bash
 asciinema play docs/demo/dry-run-diff.cast
 # golden unified diff: examples/captured/sample_legacy.unified.diff
+# regenerate GIF: agg --speed 1.5 --font-size 14 --theme monokai docs/demo/dry-run-diff.cast docs/demo/dry-run-diff.gif
 ```
 
 See [docs/demo/dry-run-diff.md](docs/demo/dry-run-diff.md).
